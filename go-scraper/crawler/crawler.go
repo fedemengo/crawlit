@@ -85,6 +85,9 @@ func (c Crawler) crawl(host, path string, id, dist int, chURL chan data, chDone 
 		}
 	}()
 
+	if dist == 0 {
+		return
+	}
 	res, err := c.client.Get(host + path)
 	if err != nil {
 		if netError, ok := err.(net.Error); ok && netError.Timeout() {
@@ -114,17 +117,15 @@ func (c Crawler) crawl(host, path string, id, dist int, chURL chan data, chDone 
 				continue
 			}
 
-			if _, ok := c.crawled[newHost+newPath]; !ok {
-				chURL <- data{id: id, url: newHost + newPath}
+			if _, present := c.crawled[newHost+newPath]; !present {
 				c.crawled[newHost+newPath] = true
-				newDist := dist
+				chURL <- data{id: id, url: newHost + newPath}
+
 				if newHost != host {
-					newDist--
+					c.crawl(newHost, newPath, id, dist-1, chURL, nil)
+				} else {
+					c.crawl(newHost, newPath, id, dist, chURL, nil)
 				}
-				if newDist == 0 {
-					continue
-				}
-				c.crawl(newHost, newPath, id, newDist, chURL, nil)
 			}
 		}
 	}

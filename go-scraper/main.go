@@ -12,12 +12,12 @@ func main() {
 	c := crawler.NewCrawler(seedURLs, false, 1, 3)
 	c.Crawl()
 
-	fmt.Println("SOME OTHER STUFF")
-	for x := 0; x < 30000000000; x++ {
-		if x%1000000000 == 0 {
-			fmt.Println(x)
-		}
-	}
+	//fmt.Println("SOME OTHER STUFF")
+	//for x := 0; x < 30000000000; x++ {
+	//	if x%1000000000 == 0 {
+	//		fmt.Println(x)
+	//	}
+	//}
 
 	foundURLs := c.Result()
 	for seedURL, foundURLs := range foundURLs {
