@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	"go-scraper/crawler"
+	"github.com/fedemengo/search-engine/web-crawler/crawler"
 	"os"
 )
 

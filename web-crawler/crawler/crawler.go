@@ -2,7 +2,7 @@ package crawler
 
 import (
 	"fmt"
-	"go-scraper/url"
+	"github.com/fedemengo/search-engine/web-crawler/url"
 	"net"
 	"net/http"
 	"time"
@@ -20,28 +20,28 @@ type Crawler struct {
 	Urls     []string
 	Restrict bool
 	Distance int
+	client   http.Client
 	resultCh chan map[string][]string
 	host     []string
 	crawled  map[string]bool
-	client   http.Client
 }
 
 // NewCrawler creates a new Crawler instance
 func NewCrawler(urls []string, restrict bool, distance, timeout int) *Crawler {
 	c := new(Crawler)
-	c.resultCh = make(chan map[string][]string)
-	c.Distance = distance
-	c.Restrict = restrict
 	c.Urls = urls
+	c.Restrict = restrict
+	c.Distance = distance
+	c.client = http.Client{
+		Timeout: time.Duration(time.Duration(timeout) * time.Second),
+	}
+	c.resultCh = make(chan map[string][]string)
 	c.host = make([]string, len(urls))
 	for i, u := range urls {
 		h, _, _ := url.SplitURL(u)
 		c.host[i] = h
 	}
 	c.crawled = make(map[string]bool)
-	c.client = http.Client{
-		Timeout: time.Duration(time.Duration(timeout) * time.Second),
-	}
 	return c
 }
 
@@ -112,6 +112,7 @@ func (c Crawler) crawl(host, path string, id, dist int, chURL chan data, chDone 
 
 		discoveredURLs := url.CreateURL(host, href)
 		for _, u := range discoveredURLs {
+
 			newHost, newPath, err := url.SplitURL(u)
 			if err != nil || (c.Restrict && newHost != c.host[id]) {
 				continue
