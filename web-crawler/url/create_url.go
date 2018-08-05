@@ -27,6 +27,9 @@ func CreateURL(h string, p string) (urls []string) {
 
 	special := regexp.MustCompile(`([?&#%].*)`)
 	p = special.ReplaceAllString(p, "")
+	if strings.Index(p, "/") != 0 {
+		p = "/" + p
+	}
 
 	urls[0] = h + p
 	if strings.Index(p, "//") == 0 {
