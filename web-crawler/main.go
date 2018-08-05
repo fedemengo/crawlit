@@ -9,7 +9,7 @@ import (
 func main() {
 	seedURLs := os.Args[1:]
 
-	c := crawler.NewCrawler(seedURLs, false, 1, 3)
+	c := crawler.NewCrawler(seedURLs, true, 3, 3, 5000)
 	c.Crawl()
 
 	//fmt.Println("SOME OTHER STUFF")

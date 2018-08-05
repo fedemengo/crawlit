@@ -20,6 +20,7 @@ type Crawler struct {
 	Urls     []string
 	Restrict bool
 	Distance int
+	maxURL	 int
 	client   http.Client
 	resultCh chan map[string][]string
 	host     []string
@@ -27,11 +28,12 @@ type Crawler struct {
 }
 
 // NewCrawler creates a new Crawler instance
-func NewCrawler(urls []string, restrict bool, distance, timeout int) *Crawler {
+func NewCrawler(urls []string, restrict bool, distance, timeout, maxURL int) *Crawler {
 	c := new(Crawler)
 	c.Urls = urls
 	c.Restrict = restrict
 	c.Distance = distance
+	c.maxURL = maxURL
 	c.client = http.Client{
 		Timeout: time.Duration(time.Duration(timeout) * time.Second),
 	}
@@ -118,8 +120,10 @@ func (c Crawler) crawl(host, path string, id, dist int, chURL chan data, chDone 
 				continue
 			}
 
-			if _, present := c.crawled[newHost+newPath]; !present {
-				c.crawled[newHost+newPath] = true
+					discoverd++
+					if discoverd > c.maxURL {
+						return
+					}
 				chURL <- data{id: id, url: newHost + newPath}
 
 				if newHost != host {
