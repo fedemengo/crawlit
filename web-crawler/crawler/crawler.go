@@ -3,6 +3,7 @@ package crawler
 import (
 	"fmt"
 	"github.com/fedemengo/search-engine/web-crawler/url"
+	"github.com/fedemengo/go-utility/data-structures/queue"
 	"net"
 	"net/http"
 	"time"
@@ -15,6 +16,12 @@ type data struct {
 	url string
 }
 
+type urlData struct {
+	host string
+	path string
+	dist int
+}
+
 // Crawler represent an object to extrapolate link from website
 type Crawler struct {
 	Urls     []string
@@ -24,7 +31,6 @@ type Crawler struct {
 	client   http.Client
 	resultCh chan map[string][]string
 	host     []string
-	crawled  map[string]bool
 }
 
 // NewCrawler creates a new Crawler instance
@@ -43,7 +49,6 @@ func NewCrawler(urls []string, restrict bool, distance, timeout, maxURL int) *Cr
 		h, _, _ := url.SplitURL(u)
 		c.host[i] = h
 	}
-	c.crawled = make(map[string]bool)
 	return c
 }
 
@@ -61,7 +66,7 @@ func (c *Crawler) Crawl() {
 
 	for id, u := range c.Urls {
 		h, p, _ := url.SplitURL(u)
-		go c.crawl(h, p, id, c.Distance, chURLs, chDone)
+		go c.crawl(h, p, id, chURLs, chDone)
 	}
 
 	// listen for result and termination
@@ -80,56 +85,71 @@ func (c *Crawler) Crawl() {
 	}()
 }
 
-func (c Crawler) crawl(host, path string, id, dist int, chURL chan data, chDone chan bool) {
+func (c Crawler) crawl(baseHost, basePath string, id int, chURL chan data, chDone chan bool) {
 	defer func() {
-		if chDone != nil {
-			chDone <- true
-		}
+		chDone <- true
 	}()
 
-	if dist == 0 {
-		return
-	}
-	res, err := c.client.Get(host + path)
-	if err != nil {
-		if netError, ok := err.(net.Error); ok && netError.Timeout() {
-			fmt.Println("ERROR: timeout on", "\""+host+path+"\"")
-		} else {
-			fmt.Println("ERROR: can't crawl", "\""+host+path+"\"")
-		}
-		return
-	}
+	discoverd := 0
+	crawled := make(map[string]bool)
+	q := queue.NewQueue()
+	q.Push(urlData{host: baseHost, path: basePath, dist: 0})
 
-	body := res.Body
-	defer body.Close()
+	for q.Size() > 0 {
+		elem := q.Pop().(urlData)
+		host, path, dist := elem.host, elem.path, elem.dist
 
-	doc, err := goquery.NewDocumentFromReader(body)
-	if err != nil {
-		return
-	}
-
-	selector := doc.Find("a")
-	for i := range selector.Nodes {
-		href, _ := selector.Eq(i).Attr("href")
-
-		discoveredURLs := url.CreateURL(host, href)
-		for _, u := range discoveredURLs {
-
-			newHost, newPath, err := url.SplitURL(u)
-			if err != nil || (c.Restrict && newHost != c.host[id]) {
-				continue
+		res, err := c.client.Get(host + path)
+		if err != nil {
+			if netError, ok := err.(net.Error); ok && netError.Timeout() {
+				fmt.Println("ERROR: timeout on", "\""+host+path+"\"")
+			} else {
+				fmt.Println("ERROR: can't crawl", "\""+host+path+"\"")
 			}
+			continue
+		} else if res.StatusCode == 404 {
+			fmt.Println("Code 404: skipping", "\""+host+path+"\"...")
+			continue
+		}
 
+		body := res.Body
+		defer body.Close()
+	
+		doc, err := goquery.NewDocumentFromReader(body)
+		if err != nil {
+			continue
+		}
+		
+		selector := doc.Find("a")
+		for i := range selector.Nodes {
+			href, _ := selector.Eq(i).Attr("href")
+
+			discoverdURLs := url.CreateURL(host, href)
+			for _, u := range discoverdURLs {
+
+				newHost, newPath, err := url.SplitURL(u)
+				if err != nil || (c.Restrict && newHost != c.host[id]) {
+					continue
+				}
+	
+				if _, present := crawled[newHost+newPath]; !present {
+					if newHost != host {
+						dist++
+					}
+	
+					if dist > c.Distance {
+						continue
+					}
+	
 					discoverd++
 					if discoverd > c.maxURL {
 						return
 					}
-				chURL <- data{id: id, url: newHost + newPath}
 
-				if newHost != host {
-					c.crawl(newHost, newPath, id, dist-1, chURL, nil)
-				} else {
-					c.crawl(newHost, newPath, id, dist, chURL, nil)
+					crawled[newHost+newPath] = true
+					chURL <- data{id: id, url: newHost + newPath}
+					q.Push(urlData{host: newHost, path: newPath, dist: dist})
+
 				}
 			}
 		}
