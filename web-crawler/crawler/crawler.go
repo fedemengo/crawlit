@@ -11,12 +11,8 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
-type data struct {
-	id  int
-	url string
-}
-
 type urlData struct {
+	seedHost string
 	host string
 	path string
 	dist int
@@ -30,7 +26,6 @@ type Crawler struct {
 	maxURL	 int
 	client   http.Client
 	resultCh chan map[string][]string
-	host     []string
 }
 
 // NewCrawler creates a new Crawler instance
@@ -44,11 +39,6 @@ func NewCrawler(urls []string, restrict bool, distance, timeout, maxURL int) *Cr
 		Timeout: time.Duration(time.Duration(timeout) * time.Second),
 	}
 	c.resultCh = make(chan map[string][]string)
-	c.host = make([]string, len(urls))
-	for i, u := range urls {
-		h, _, _ := url.SplitURL(u)
-		c.host[i] = h
-	}
 	return c
 }
 
@@ -61,23 +51,23 @@ func (c *Crawler) Result() (urls map[string][]string) {
 // Crawl is the public method used to start the crawling
 func (c *Crawler) Crawl() {
 	result := make(map[string][]string)
-	chURLs := make(chan data)
-	chDone := make(chan bool)
+	chURLs := make(chan urlData)
 
-	for id, u := range c.Urls {
+	for _, u := range c.Urls {
 		h, p, _ := url.SplitURL(u)
-		go c.crawl(h, p, id, chURLs, chDone)
+		go c.crawl(h, p, chURLs)
 	}
 
 	// listen for result and termination
 	go func() {
 		for routines := len(c.Urls); routines > 0; {
 			select {
-			case d := <-chURLs:
-				host := c.Urls[d.id]
-				result[host] = append(result[host], d.url)
-			case <-chDone:
-				routines--
+			case data, ok := <-chURLs:
+				if ok {
+					result[data.seedHost] = append(result[data.seedHost], data.host + data.path)
+				} else {
+					routines--
+				} 
 			}
 		}
 		c.resultCh <- result
@@ -85,9 +75,9 @@ func (c *Crawler) Crawl() {
 	}()
 }
 
-func (c Crawler) crawl(baseHost, basePath string, id int, chURL chan data, chDone chan bool) {
+func (c Crawler) crawl(baseHost, basePath string, chURL chan urlData) {
 	defer func() {
-		chDone <- true
+		close(chURL)
 	}()
 
 	discoverd := 0
@@ -108,7 +98,7 @@ func (c Crawler) crawl(baseHost, basePath string, id int, chURL chan data, chDon
 			}
 			continue
 		} else if res.StatusCode == 404 {
-			fmt.Println("Code 404: skipping", "\""+host+path+"\"...")
+			fmt.Println("Code 404: skipping", "\""+host+path+"\"")
 			continue
 		}
 
@@ -122,34 +112,34 @@ func (c Crawler) crawl(baseHost, basePath string, id int, chURL chan data, chDon
 		
 		selector := doc.Find("a")
 		for i := range selector.Nodes {
-			href, _ := selector.Eq(i).Attr("href")
 
+			href, _ := selector.Eq(i).Attr("href")
 			discoverdURLs := url.CreateURL(host, href)
 			for _, u := range discoverdURLs {
-
+				
 				newHost, newPath, err := url.SplitURL(u)
-				if err != nil || (c.Restrict && newHost != c.host[id]) {
+				if err != nil || (c.Restrict && newHost != baseHost) {
 					continue
 				}
-	
+				
 				if _, present := crawled[newHost+newPath]; !present {
 					if newHost != host {
 						dist++
 					}
-	
+					
 					if dist > c.Distance {
 						continue
 					}
-	
+					
 					discoverd++
 					if discoverd > c.maxURL {
 						return
 					}
-
+					
 					crawled[newHost+newPath] = true
-					chURL <- data{id: id, url: newHost + newPath}
-					q.Push(urlData{host: newHost, path: newPath, dist: dist})
-
+					data := urlData{seedHost: baseHost, host: newHost, path: newPath, dist: dist}
+					chURL <- data
+					q.Push(data)
 				}
 			}
 		}
