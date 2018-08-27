@@ -102,6 +102,9 @@ func (c Crawler) crawl(baseHost, basePath string, chURL chan urlData) {
 			continue
 		}
 
+		// save new URL
+		chURL <- elem
+
 		body := res.Body
 		defer body.Close()
 	
@@ -135,10 +138,7 @@ func (c Crawler) crawl(baseHost, basePath string, chURL chan urlData) {
 					if discoverd > c.maxURL {
 						return
 					}
-					
-					crawled[newHost+newPath] = true
 					data := urlData{seedHost: baseHost, host: newHost, path: newPath, dist: dist}
-					chURL <- data
 					q.Push(data)
 				}
 			}
