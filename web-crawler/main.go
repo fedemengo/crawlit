@@ -9,7 +9,14 @@ import (
 func main() {
 	seedURLs := os.Args[1:]
 
-	c := crawler.NewCrawler(seedURLs, true, 3, 3, 5000)
+	/**
+	  * urls
+	  * restricted
+	  * distance
+	  * timeout
+	  * max number of url
+	  */
+	c := crawler.NewCrawler(seedURLs, true, 5, 3, 500)
 	c.Crawl()
 
 	//fmt.Println("SOME OTHER STUFF")

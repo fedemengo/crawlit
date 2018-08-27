@@ -9,8 +9,8 @@ import (
 func removeTerminal(url string) string {
 	mail := regexp.MustCompile(`mailto.*`)
 	slash := regexp.MustCompile(`/$`)
-	ignore := regexp.MustCompile(`/\.\./`)
-	return ignore.ReplaceAllString(slash.ReplaceAllString(mail.ReplaceAllString(url, ""), ""), "/")
+	ignore := regexp.MustCompile(`(/\.\./*)+`)
+	return slash.ReplaceAllString(ignore.ReplaceAllString(mail.ReplaceAllString(url, ""), "/"), "")
 }
 
 // CreateURL creates a sanityzed URL from the given host and pathname

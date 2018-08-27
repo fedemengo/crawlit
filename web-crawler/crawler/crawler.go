@@ -81,24 +81,24 @@ func (c Crawler) crawl(baseHost, basePath string, chURL chan urlData) {
 	}()
 
 	discoverd := 0
-	crawled := make(map[string]bool)
+	inQueue := make(map[string]bool)
 	q := queue.NewQueue()
-	q.Push(urlData{host: baseHost, path: basePath, dist: 0})
+	q.Push(urlData{seedHost: baseHost, host: baseHost, path: basePath, dist: 0})
+	inQueue[baseHost + basePath] = true
 
 	for q.Size() > 0 {
 		elem := q.Pop().(urlData)
-		host, path, dist := elem.host, elem.path, elem.dist
 
-		res, err := c.client.Get(host + path)
+		res, err := c.client.Get(elem.host + elem.path)
 		if err != nil {
 			if netError, ok := err.(net.Error); ok && netError.Timeout() {
-				fmt.Println("ERROR: timeout on", "\""+host+path+"\"")
+				fmt.Println("ERROR: TIMEOUT on", "\""+elem.host+elem.path+"\"")
 			} else {
-				fmt.Println("ERROR: can't crawl", "\""+host+path+"\"")
+				fmt.Println("ERROR: can't crawl", "\""+elem.host+elem.path+"\"")
 			}
 			continue
 		} else if res.StatusCode == 404 {
-			fmt.Println("Code 404: skipping", "\""+host+path+"\"")
+			fmt.Println("Code 404: skipping", "\""+elem.host+elem.path+"\"")
 			continue
 		}
 
@@ -117,7 +117,7 @@ func (c Crawler) crawl(baseHost, basePath string, chURL chan urlData) {
 		for i := range selector.Nodes {
 
 			href, _ := selector.Eq(i).Attr("href")
-			discoverdURLs := url.CreateURL(host, href)
+			discoverdURLs := url.CreateURL(elem.host, href)
 			for _, u := range discoverdURLs {
 				
 				newHost, newPath, err := url.SplitURL(u)
@@ -125,8 +125,9 @@ func (c Crawler) crawl(baseHost, basePath string, chURL chan urlData) {
 					continue
 				}
 				
-				if _, present := crawled[newHost+newPath]; !present {
-					if newHost != host {
+				if _, ok := inQueue[newHost+newPath]; !ok {
+					dist := elem.dist
+					if newHost != elem.host {
 						dist++
 					}
 					
@@ -140,6 +141,7 @@ func (c Crawler) crawl(baseHost, basePath string, chURL chan urlData) {
 					}
 					data := urlData{seedHost: baseHost, host: newHost, path: newPath, dist: dist}
 					q.Push(data)
+					inQueue[newHost + newPath] = true
 				}
 			}
 		}
