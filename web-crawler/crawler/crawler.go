@@ -6,10 +6,13 @@ import (
 	"github.com/fedemengo/go-utility/data-structures/queue"
 	"net"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
 )
+
+type Handler func(res *http.Response) error
 
 type urlData struct {
 	seedHost string
@@ -49,13 +52,12 @@ func (c *Crawler) Result() (urls map[string][]string) {
 }
 
 // Crawl is the public method used to start the crawling
-func (c *Crawler) Crawl() {
+func (c *Crawler) Crawl(handler Handler) {
 	result := make(map[string][]string)
 	chURLs := make(chan urlData)
 
-	for _, u := range c.Urls {
-		h, p, _ := url.SplitURL(u)
-		go c.crawl(h, p, chURLs)
+	for _, u := range c.URLs {
+		go c.crawl(u, chURLs, handler)
 	}
 
 	// listen for result and termination
@@ -75,7 +77,7 @@ func (c *Crawler) Crawl() {
 	}()
 }
 
-func (c Crawler) crawl(baseHost, basePath string, chURL chan urlData) {
+func (c Crawler) crawl(newURL *url.URL, chURL chan urlData, handler Handler) {
 	defer func() {
 		close(chURL)
 	}()
@@ -105,6 +107,10 @@ func (c Crawler) crawl(baseHost, basePath string, chURL chan urlData) {
 		// save new URL
 		chURL <- elem
 
+		if err = handler(res); err != nil {
+			return
+		}
+	
 		body := res.Body
 		defer body.Close()
 	

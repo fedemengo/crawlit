@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/fedemengo/search-engine/web-crawler/crawler"
 	"os"
+	"net/http"
 )
 
 func main() {
@@ -17,7 +18,18 @@ func main() {
 	  * max number of url
 	  */
 	c := crawler.NewCrawler(seedURLs, true, 5, 3, 500)
-	c.Crawl()
+	c.Crawl(func(res *http.Response) (err error) {
+/*		for k, v := range res.Header {
+			fmt.Println(k)
+			for _, d := range v {
+				fmt.Print(d, " ")
+			}
+			fmt.Println()
+		}
+*/
+		fmt.Println("-", res.Request.URL.String())
+		return nil
+	})
 
 	//fmt.Println("SOME OTHER STUFF")
 	//for x := 0; x < 30000000000; x++ {
