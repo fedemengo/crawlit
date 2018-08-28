@@ -17,7 +17,7 @@ func main() {
 	  * timeout
 	  * max number of url
 	  */
-	c := crawler.NewCrawler(seedURLs, true, 5, 3, 500)
+	c := crawler.NewCrawler(seedURLs, true, 5, 5, 50)
 	c.Crawl(func(res *http.Response) (err error) {
 /*		for k, v := range res.Header {
 			fmt.Println(k)
@@ -27,7 +27,7 @@ func main() {
 			fmt.Println()
 		}
 */
-		fmt.Println("-", res.Request.URL.String())
+		fmt.Println("->", res.Request.URL.String())
 		return nil
 	})
 
@@ -45,4 +45,5 @@ func main() {
 			fmt.Println(" - " + url)
 		}
 	}
+	
 }

@@ -2,7 +2,6 @@ package crawler
 
 import (
 	"fmt"
-	"github.com/fedemengo/search-engine/web-crawler/url"
 	"github.com/fedemengo/go-utility/data-structures/queue"
 	"net"
 	"net/http"
@@ -15,15 +14,14 @@ import (
 type Handler func(res *http.Response) error
 
 type urlData struct {
-	seedHost string
-	host string
-	path string
+	seed string
+	rawUrl *url.URL	
 	dist int
 }
 
 // Crawler represent an object to extrapolate link from website
 type Crawler struct {
-	Urls     []string
+	URLs     []*url.URL
 	Restrict bool
 	Distance int
 	maxURL	 int
@@ -34,7 +32,12 @@ type Crawler struct {
 // NewCrawler creates a new Crawler instance
 func NewCrawler(urls []string, restrict bool, distance, timeout, maxURL int) *Crawler {
 	c := new(Crawler)
-	c.Urls = urls
+	for _, u := range urls {
+		next, err := url.Parse(u)
+		if err == nil {
+			c.URLs = append(c.URLs, next)
+		}
+	}
 	c.Restrict = restrict
 	c.Distance = distance
 	c.maxURL = maxURL
@@ -62,11 +65,11 @@ func (c *Crawler) Crawl(handler Handler) {
 
 	// listen for result and termination
 	go func() {
-		for routines := len(c.Urls); routines > 0; {
+		for routines := len(c.URLs); routines > 0; {
 			select {
 			case data, ok := <-chURLs:
 				if ok {
-					result[data.seedHost] = append(result[data.seedHost], data.host + data.path)
+					result[data.seed] = append(result[data.seed], data.rawUrl.String())
 				} else {
 					routines--
 				} 
@@ -81,32 +84,48 @@ func (c Crawler) crawl(newURL *url.URL, chURL chan urlData, handler Handler) {
 	defer func() {
 		close(chURL)
 	}()
+	
+	maxQueued := 10 * c.maxURL
 
 	discoverd := 0
 	inQueue := make(map[string]bool)
+	crawled := make(map[string]bool)
 	q := queue.NewQueue()
-	q.Push(urlData{seedHost: baseHost, host: baseHost, path: basePath, dist: 0})
-	inQueue[baseHost + basePath] = true
+
+	newURL = newURL.ResolveReference(newURL)
+	q.Push(urlData{seed: newURL.Host, rawUrl: newURL, dist: 0})
+	inQueue[newURL.String()] = true
 
 	for q.Size() > 0 {
-		elem := q.Pop().(urlData)
 
-		res, err := c.client.Get(elem.host + elem.path)
+		elem := q.Pop().(urlData)
+		res, err := c.client.Get(elem.rawUrl.String())
 		if err != nil {
 			if netError, ok := err.(net.Error); ok && netError.Timeout() {
-				fmt.Println("ERROR: TIMEOUT on", "\""+elem.host+elem.path+"\"")
+				fmt.Println("ERROR TIMEOUT: on", "\""+elem.rawUrl.String()+"\"")
 			} else {
-				fmt.Println("ERROR: can't crawl", "\""+elem.host+elem.path+"\"")
+				fmt.Println("ERROR: can't crawl", "\""+elem.rawUrl.String()+"\"")
 			}
 			continue
 		} else if res.StatusCode == 404 {
-			fmt.Println("Code 404: skipping", "\""+elem.host+elem.path+"\"")
+			fmt.Println("ERROR 404: skipping", "\""+elem.rawUrl.String()+"\"")
+			continue
+		}
+
+		discoverd++
+		if discoverd > c.maxURL {
+			return
+		}
+
+		reqUrl := ClearUrl(res.Request.URL)
+		if _, ok := crawled[reqUrl]; ok {
 			continue
 		}
 
 		// save new URL
+		crawled[reqUrl] = true
+		elem.rawUrl = res.Request.URL
 		chURL <- elem
-
 		if err = handler(res); err != nil {
 			return
 		}
@@ -116,6 +135,7 @@ func (c Crawler) crawl(newURL *url.URL, chURL chan urlData, handler Handler) {
 	
 		doc, err := goquery.NewDocumentFromReader(body)
 		if err != nil {
+			fmt.Println("ERROR: can't read body")
 			continue
 		}
 		
@@ -123,31 +143,26 @@ func (c Crawler) crawl(newURL *url.URL, chURL chan urlData, handler Handler) {
 		for i := range selector.Nodes {
 
 			href, _ := selector.Eq(i).Attr("href")
-			discoverdURLs := url.CreateURL(elem.host, href)
-			for _, u := range discoverdURLs {
-				
-				newHost, newPath, err := url.SplitURL(u)
-				if err != nil || (c.Restrict && newHost != baseHost) {
-					continue
+			nextURL, err := newURL.Parse(href)
+			if err != nil || (c.Restrict && nextURL.Host != newURL.Host) {
+				continue
+			}
+		
+			cleanURL := ClearUrl(nextURL)
+			if _, ok := inQueue[cleanURL]; !ok {
+				dist := elem.dist
+				if nextURL.Host != elem.rawUrl.Host {
+					dist++
 				}
 				
-				if _, ok := inQueue[newHost+newPath]; !ok {
-					dist := elem.dist
-					if newHost != elem.host {
-						dist++
-					}
-					
-					if dist > c.Distance {
-						continue
-					}
-					
-					discoverd++
-					if discoverd > c.maxURL {
-						return
-					}
-					data := urlData{seedHost: baseHost, host: newHost, path: newPath, dist: dist}
+				if dist > c.Distance {
+					continue
+				}
+							
+				if q.Size() < maxQueued {
+					data := urlData{seed: newURL.Host, rawUrl: nextURL, dist: dist}
 					q.Push(data)
-					inQueue[newHost + newPath] = true
+					inQueue[cleanURL] = true
 				}
 			}
 		}
