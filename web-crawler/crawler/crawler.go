@@ -97,18 +97,16 @@ func (c Crawler) crawl(newURL *url.URL, chURL chan urlData, handler Handler) {
 	inQueue[newURL.String()] = true
 
 	for q.Size() > 0 {
-
 		elem := q.Pop().(urlData)
-		res, err := c.client.Get(elem.rawUrl.String())
-		if err != nil {
-			if netError, ok := err.(net.Error); ok && netError.Timeout() {
-				fmt.Println("ERROR TIMEOUT: on", "\""+elem.rawUrl.String()+"\"")
-			} else {
-				fmt.Println("ERROR: can't crawl", "\""+elem.rawUrl.String()+"\"")
-			}
+
+		plainUrl := elem.pUrl.String()
+		res, err := c.client.Get(plainUrl)
+		if skip := LogResponse(plainUrl, res, err); skip {
 			continue
-		} else if res.StatusCode == 404 {
-			fmt.Println("ERROR 404: skipping", "\""+elem.rawUrl.String()+"\"")
+			}
+
+		reqUrl := ClearUrl(res.Request.URL)
+		if _, ok := crawled[reqUrl]; ok {
 			continue
 		}
 
