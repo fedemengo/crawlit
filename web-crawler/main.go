@@ -2,32 +2,33 @@ package main
 
 import (
 	"fmt"
-	"github.com/fedemengo/search-engine/web-crawler/crawler"
 	"os"
 	"net/http"
+
+	"github.com/fedemengo/search-engine/web-crawler/crawler"
 )
 
 func main() {
 	seedURLs := os.Args[1:]
 
 	/**
-	  * urls
-	  * restricted
-	  * distance
-	  * timeout
-	  * max number of url
-	  */
-	c := crawler.NewCrawler(seedURLs, true, 5, 5, 50)
+	 * urls
+	 * restricted
+	 * distance
+	 * timeout
+	 * max number of url
+	 */
+	c := crawler.NewCrawler(seedURLs, true, 5, 5, 500)
 	c.Crawl(func(res *http.Response) (err error) {
-/*		for k, v := range res.Header {
-			fmt.Println(k)
-			for _, d := range v {
-				fmt.Print(d, " ")
-			}
-			fmt.Println()
-		}
-*/
-		fmt.Println("->", res.Request.URL.String())
+		/*		for k, v := range res.Header {
+					fmt.Println(k)
+					for _, d := range v {
+						fmt.Print(d, " ")
+					}
+					fmt.Println()
+				}
+		*/
+		fmt.Println("-", res.Request.URL.String())
 		return nil
 	})
 
@@ -45,5 +46,4 @@ func main() {
 			fmt.Println(" - " + url)
 		}
 	}
-	
 }
