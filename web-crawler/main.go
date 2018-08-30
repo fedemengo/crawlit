@@ -28,7 +28,7 @@ func main() {
 					fmt.Println()
 				}
 		*/
-		fmt.Println("-", res.Request.URL.String())
+		fmt.Println(" -> " + res.Request.URL.String())
 		return nil
 	})
 
@@ -40,8 +40,8 @@ func main() {
 	//}
 
 	foundURLs := c.Result()
-	for seedURL, foundURLs := range foundURLs {
-		fmt.Println(len(foundURLs), "found for", seedURL)
+	for i, foundURLs := range foundURLs {
+		fmt.Println(len(foundURLs), "found for", seedURLs[i])
 		for _, url := range foundURLs {
 			fmt.Println(" - " + url)
 		}

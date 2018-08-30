@@ -8,29 +8,25 @@ import (
 	"net/http"
 )
 
-func removeTerminal(rawURL string) string {
-	special := regexp.MustCompile(`/$`)
-	return special.ReplaceAllString(rawURL, "")
-}
-
 func ClearUrl(u *url.URL) string {
 	u.Fragment = ""
 	u = u.ResolveReference(u)
 
-	return removeTerminal(u.String())
+	special := regexp.MustCompile(`/$`)
+	return special.ReplaceAllString(u.String(), "")
 }
 
 func LogResponse(url string, res *http.Response, err error) (skip bool) {
 	skip = false
 	if err != nil {
 		if netError, ok := err.(net.Error); ok && netError.Timeout() {
-			fmt.Println("ERROR TIMEOUT: on", "\""+url+"\"")
+			fmt.Printf("ERROR TIMEOUT: on \"%s\"\n", url)
 		} else {
-			fmt.Println("ERROR: can't crawl", "\""+url+"\"")
+			fmt.Printf("ERROR: can't crawl \"%s\"\n", url)
 		}
 		skip = true
-	} else if res.StatusCode == 404 {
-		fmt.Println("ERROR 404: skipping", "\""+url+"\"")
+	} else if code := res.StatusCode; code != 200 {
+		fmt.Printf("ERROR %d: skipping \"%s\"\n", code, url)
 		skip = true
 	}
 	return

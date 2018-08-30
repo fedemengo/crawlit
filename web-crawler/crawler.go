@@ -10,10 +10,10 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
+// Handler callback type
 type Handler func(res *http.Response) error
 
 type urlData struct {
-	seed string
 	pUrl *url.URL	
 	dist int
 }
@@ -26,7 +26,7 @@ type Crawler struct {
 	maxURL	 int
 	maxQueued int
 	client   http.Client
-	resultCh chan map[string][]string
+	resultCh chan map[int][]string
 }
 
 // NewCrawler creates a new Crawler instance
@@ -45,23 +45,26 @@ func NewCrawler(urls []string, restrict bool, distance, timeout, maxURL int) *Cr
 	c.client = http.Client{
 		Timeout: time.Duration(time.Duration(timeout) * time.Second),
 	}
-	c.resultCh = make(chan map[string][]string)
+	c.resultCh = make(chan map[int][]string)
 	return c
 }
 
 // Result will return the result of the crawling, blocking
-func (c *Crawler) Result() (urls map[string][]string) {
+func (c *Crawler) Result() (urls map[int][]string) {
 	urls = <-c.resultCh
 	return
 }
 
 // Crawl is the public method used to start the crawling
 func (c *Crawler) Crawl(handler Handler) {
-	result := make(map[string][]string)
+	// store urls retrieved from any given seed
+	result := make(map[int][]string)
+	// channels for each seed
 	chURLs := make([]chan urlData, len(c.URLs))
 	for i := range chURLs {
 		chURLs[i] = make(chan urlData)
 	}
+	// notify when routines are done
 	quit := make(chan int)
 
 	// spawn a routine for each seed to crawl
@@ -73,8 +76,8 @@ func (c *Crawler) Crawl(handler Handler) {
 	for i, ch := range chURLs {
 		go func(c chan urlData, id int) {
 			for data := range c {
-				// directly save the result
-				result[data.seed] = append(result[data.seed], data.pUrl.String())
+				// save the results
+				result[id] = append(result[id], data.pUrl.String())
 			}
 			quit <- id
 		}(ch, i)
@@ -82,11 +85,11 @@ func (c *Crawler) Crawl(handler Handler) {
 
 	// routine listen for result and termination
 	go func() {
-		for seed := len(c.URLs); seed > 0; {
+		for seeds := len(c.URLs); seeds > 0; {
 			select {
 			// listen for completed seed
 			case id := <- quit:
-				seed--
+				seeds--
 				fmt.Println("COMPLETE", c.URLs[id].String())
 			}
 		}
@@ -96,19 +99,24 @@ func (c *Crawler) Crawl(handler Handler) {
 	}()
 }
 
-func (c Crawler) crawl(newURL *url.URL, chURL chan urlData, handler Handler) {
+func (c Crawler) crawl(seedURL *url.URL, chURL chan urlData, handler Handler) {
+	// one completed close channel
 	defer func() {
 		close(chURL)
 	}()
 	
 	discoverd := 0
+	// keep track of the queued url
 	inQueue := make(map[string]bool)
+	// keep track of the crawled url (res.StatusCode == 200)
 	crawled := make(map[string]bool)
 	q := queue.NewQueue()
 
-	newURL = newURL.ResolveReference(newURL)
-	q.Push(urlData{seed: newURL.Host, pUrl: newURL, dist: 0})
-	inQueue[newURL.String()] = true
+	// resolve references if present
+	seedURL = seedURL.ResolveReference(seedURL)
+	// push the seed in queue
+	q.Push(urlData{pUrl: seedURL, dist: 0})
+	inQueue[seedURL.String()] = true
 
 	for q.Size() > 0 {
 		elem := q.Pop().(urlData)
@@ -149,28 +157,36 @@ func (c Crawler) crawl(newURL *url.URL, chURL chan urlData, handler Handler) {
 		for i := range selector.Nodes {
 
 			href, _ := selector.Eq(i).Attr("href")
-			nextURL, err := newURL.Parse(href)
-			if err != nil || (c.Restrict && nextURL.Host != newURL.Host) {
+			nextURL, err := seedURL.Parse(href)
+			if err != nil || (c.Restrict && nextURL.Host != seedURL.Host) {
 				continue
 			}
 		
+			// if url is already in queue, skip
 			cleanURL := ClearUrl(nextURL)
-			if _, ok := inQueue[cleanURL]; !ok {
-				d := elem.dist
-				if nextURL.Host != elem.pUrl.Host {
-					d++
-				}
-				
-				if d > c.Distance {
-					continue
-				}
-							
-				if q.Size() < c.maxQueued {
-					data := urlData{seed: newURL.Host, pUrl: nextURL, dist: d}
-					q.Push(data)
-					// avoid duplicate URL in queue
-					inQueue[cleanURL] = true
-				}
+			if _, ok := inQueue[cleanURL]; ok {
+				continue
+			}
+
+			// FIXME
+			// distance is calculate based on difference between host
+			// it's not accurate
+			// seed.com (0) -> a.com (1) -> b.com (2) -> seed.com (3)
+			// seed.com (0) -> a.com (1) -> b.com (2) -> a.com (3)
+			d := elem.dist
+			if nextURL.Host != elem.pUrl.Host {
+				d++
+			}
+			
+			if d > c.Distance {
+				continue
+			}
+						
+			if q.Size() < c.maxQueued {
+				data := urlData{pUrl: nextURL, dist: d}
+				q.Push(data)
+				// avoid duplicate URL in queue
+				inQueue[cleanURL] = true
 			}
 		}
 	}
