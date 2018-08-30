@@ -18,9 +18,9 @@ type Crawler struct {
 	URLs     []*url.URL
 	Restrict bool
 	Distance int
+	timeout int
 	maxURL	 int
 	maxQueued int
-	client   http.Client
 	resultCh chan map[int][]string
 }
 
@@ -35,11 +35,9 @@ func NewCrawler(urls []string, restrict bool, distance, timeout, maxURL int) *Cr
 	}
 	c.Restrict = restrict
 	c.Distance = distance
+	c.timeout = timeout
 	c.maxURL = maxURL
 	c.maxQueued = 100 * c.maxURL
-	c.client = http.Client{
-		Timeout: time.Duration(time.Duration(timeout) * time.Second),
-	}
 	c.resultCh = make(chan map[int][]string)
 	return c
 }
@@ -100,6 +98,11 @@ func (c Crawler) crawl(seedURL *url.URL, chURL chan *url.URL, handler Handler) {
 		close(chURL)
 	}()
 	
+	// initialize a client for each routine
+	client := http.Client{
+		Timeout: time.Duration(time.Duration(c.timeout) * time.Second),
+	}
+
 	discoverd := 0
 	// keep track of the queued url
 	inQueue := make(map[string]bool)
@@ -121,7 +124,7 @@ func (c Crawler) crawl(seedURL *url.URL, chURL chan *url.URL, handler Handler) {
 		currURL := q.Pop().(*url.URL)
 
 		plainUrl := currURL.String()
-		res, err := c.client.Get(plainUrl)
+		res, err := client.Get(plainUrl)
 		if skip := LogResponse(plainUrl, res, err); skip {
 			continue
 		}
