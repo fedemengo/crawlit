@@ -13,11 +13,6 @@ import (
 // Handler callback type
 type Handler func(res *http.Response) error
 
-type urlData struct {
-	pUrl *url.URL	
-	dist int
-}
-
 // Crawler represent an object to extrapolate link from website
 type Crawler struct {
 	URLs     []*url.URL
@@ -60,9 +55,9 @@ func (c *Crawler) Crawl(handler Handler) {
 	// store urls retrieved from any given seed
 	result := make(map[int][]string)
 	// channels for each seed
-	chURLs := make([]chan urlData, len(c.URLs))
+	chURLs := make([]chan *url.URL, len(c.URLs))
 	for i := range chURLs {
-		chURLs[i] = make(chan urlData)
+		chURLs[i] = make(chan *url.URL)
 	}
 	// notify when routines are done
 	quit := make(chan int)
@@ -74,10 +69,10 @@ func (c *Crawler) Crawl(handler Handler) {
 
 	// spawn a routine to listen on every seed channel
 	for i, ch := range chURLs {
-		go func(c chan urlData, id int) {
-			for data := range c {
+		go func(c chan *url.URL, id int) {
+			for u := range c {
 				// save the results
-				result[id] = append(result[id], data.pUrl.String())
+				result[id] = append(result[id], u.String())
 			}
 			quit <- id
 		}(ch, i)
@@ -99,7 +94,7 @@ func (c *Crawler) Crawl(handler Handler) {
 	}()
 }
 
-func (c Crawler) crawl(seedURL *url.URL, chURL chan urlData, handler Handler) {
+func (c Crawler) crawl(seedURL *url.URL, chURL chan *url.URL, handler Handler) {
 	// one completed close channel
 	defer func() {
 		close(chURL)
@@ -110,18 +105,22 @@ func (c Crawler) crawl(seedURL *url.URL, chURL chan urlData, handler Handler) {
 	inQueue := make(map[string]bool)
 	// keep track of the crawled url (res.StatusCode == 200)
 	crawled := make(map[string]bool)
+	// keep track of distance to other hosts
+	hostDist := make(map[string]int)
 	q := queue.NewQueue()
 
 	// resolve references if present
 	seedURL = seedURL.ResolveReference(seedURL)
+	// set initial distanc
+	hostDist[seedURL.Host] = 0;
 	// push the seed in queue
-	q.Push(urlData{pUrl: seedURL, dist: 0})
+	q.Push(seedURL)
 	inQueue[seedURL.String()] = true
 
 	for q.Size() > 0 {
-		elem := q.Pop().(urlData)
+		currURL := q.Pop().(*url.URL)
 
-		plainUrl := elem.pUrl.String()
+		plainUrl := currURL.String()
 		res, err := c.client.Get(plainUrl)
 		if skip := LogResponse(plainUrl, res, err); skip {
 			continue
@@ -139,8 +138,8 @@ func (c Crawler) crawl(seedURL *url.URL, chURL chan urlData, handler Handler) {
 
 		// save new URL whose request went through
 		crawled[reqUrl] = true
-		elem.pUrl = res.Request.URL
-		chURL <- elem
+		currURL = res.Request.URL
+		chURL <- currURL
 		if err = handler(res); err != nil {
 			return
 		}
@@ -157,7 +156,7 @@ func (c Crawler) crawl(seedURL *url.URL, chURL chan urlData, handler Handler) {
 		for i := range selector.Nodes {
 
 			href, _ := selector.Eq(i).Attr("href")
-			nextURL, err := seedURL.Parse(href)
+			nextURL, err := currURL.Parse(href)
 			if err != nil || (c.Restrict && nextURL.Host != seedURL.Host) {
 				continue
 			}
@@ -168,23 +167,19 @@ func (c Crawler) crawl(seedURL *url.URL, chURL chan urlData, handler Handler) {
 				continue
 			}
 
-			// FIXME
-			// distance is calculate based on difference between host
-			// it's not accurate
-			// seed.com (0) -> a.com (1) -> b.com (2) -> seed.com (3)
-			// seed.com (0) -> a.com (1) -> b.com (2) -> a.com (3)
-			d := elem.dist
-			if nextURL.Host != elem.pUrl.Host {
-				d++
+			// check distance
+			dist := hostDist[currURL.Host]
+			if _, ok := hostDist[nextURL.Host]; !ok {
+				dist++
+				if dist > c.Distance {
+					continue
+				} else {
+					hostDist[nextURL.Host] = dist
+				}
 			}
-			
-			if d > c.Distance {
-				continue
-			}
-						
+								
 			if q.Size() < c.maxQueued {
-				data := urlData{pUrl: nextURL, dist: d}
-				q.Push(data)
+				q.Push(nextURL)
 				// avoid duplicate URL in queue
 				inQueue[cleanURL] = true
 			}

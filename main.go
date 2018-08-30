@@ -5,7 +5,7 @@ import (
 	"os"
 	"net/http"
 
-	"github.com/fedemengo/search-engine/web-crawler/crawler"
+	"github.com/fedemengo/search-engine/web-crawler"
 )
 
 func main() {
@@ -18,7 +18,7 @@ func main() {
 	 * timeout
 	 * max number of url
 	 */
-	c := crawler.NewCrawler(seedURLs, true, 5, 5, 500)
+	c := crawler.NewCrawler(seedURLs, false, 1, 5, 500)
 	c.Crawl(func(res *http.Response) (err error) {
 		/*		for k, v := range res.Header {
 					fmt.Println(k)

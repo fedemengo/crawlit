@@ -10,6 +10,7 @@ import (
 
 func ClearUrl(u *url.URL) string {
 	u.Fragment = ""
+	u.RawQuery = ""
 	u = u.ResolveReference(u)
 
 	special := regexp.MustCompile(`/$`)
