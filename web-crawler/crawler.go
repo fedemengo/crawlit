@@ -20,13 +20,14 @@ type urlData struct {
 
 // Crawler represent an object to extrapolate link from website
 type Crawler struct {
-	URLs      []*url.URL
-	Restrict  bool
-	Distance  int
+	seedURLs  []*url.URL
+	restrict  bool
+	distance  int
 	timeout   int
 	maxURL    int
 	maxQueued int
-	resultCh  chan map[int][]string
+	discURLs  [][]string
+	result    chan map[int][]string
 }
 
 // NewCrawler creates a new Crawler instance
@@ -34,97 +35,76 @@ func NewCrawler(urls []string, restrict bool, distance, timeout, maxURL int) *Cr
 	c := new(Crawler)
 	for _, u := range urls {
 		next, err := url.Parse(u)
+		next = next.ResolveReference(next)
 		if err == nil {
-			c.URLs = append(c.URLs, next)
+			c.seedURLs = append(c.seedURLs, next)
 		}
 	}
-	c.Restrict = restrict
-	c.Distance = distance
+	c.restrict = restrict
+	c.distance = distance
 	c.timeout = timeout
 	c.maxURL = maxURL
 	c.maxQueued = 100 * c.maxURL
-	c.resultCh = make(chan map[int][]string)
+	c.discURLs = make([][]string, len(c.seedURLs))
+	c.result = make(chan map[int][]string)
 	return c
 }
 
 // Result will return the result of the crawling, blocking
 func (c *Crawler) Result() (urls map[int][]string) {
-	urls = <-c.resultCh
+	urls = <-c.result
 	return
 }
 
 // Crawl is the public method used to start the crawling
 func (c *Crawler) Crawl(handler Handler) {
-	// store urls retrieved from any given seed
-	result := make(map[int][]string)
-	// channels for each seed
-	chURLs := make([]chan *url.URL, len(c.URLs))
-	for i := range chURLs {
-		chURLs[i] = make(chan *url.URL)
-	}
+
+	results := make(map[int][]string)
 	// notify when routines are done
 	quit := make(chan int)
 
 	// spawn a routine for each seed to crawl
-	for i := range c.URLs {
-		go c.crawl(c.URLs[i], chURLs[i], handler)
-	}
-
-	// spawn a routine to listen on every seed channel
-	for i, ch := range chURLs {
-		go func(c chan *url.URL, id int) {
-			for u := range c {
-				// save the results
-				result[id] = append(result[id], u.String())
-			}
-			quit <- id
-		}(ch, i)
+	for i := range c.seedURLs {
+		go c.crawl(i, handler, quit)
 	}
 
 	// routine listen for result and termination
 	go func() {
-		for seeds := len(c.URLs); seeds > 0; {
+		for seeds := len(c.seedURLs); seeds > 0; {
 			select {
 			// listen for completed seed
 			case id := <-quit:
 				seeds--
-				fmt.Println("COMPLETE", c.URLs[id].String())
+				results[id] = c.discURLs[id]
+				fmt.Println("COMPLETE", c.seedURLs[id].String())
 			}
 		}
 		close(quit)
-		c.resultCh <- result
-		close(c.resultCh)
+		c.result <- results
 	}()
 }
 
-func (c *Crawler) isValid(seedURL *url.URL, elem urlData, nextURL *url.URL) (uData urlData, valid bool) {
+func (c *Crawler) isValid(id int, elem urlData, nextURL *url.URL) (uData urlData, valid bool) {
 	uData = urlData{pURL: nextURL, dist: elem.dist + 1}
 	valid = true
 
-	if c.Distance == -1 {
-		if elem.pURL.Host != seedURL.Host {
+	if c.distance == -1 {
+		if elem.pURL.Host != c.seedURLs[id].Host {
 			valid = false
-			return
 		}
-	} else if uData.dist > c.Distance {
+	} else if uData.dist > c.distance {
 		valid = false
-		return
 	}
 
-	if c.Restrict && nextURL.Host != seedURL.Host {
+	if c.restrict && nextURL.Host != c.seedURLs[id].Host {
 		valid = false
-		return
 	}
 
 	ClearURL(uData.pURL)
 	return
 }
 
-func (c *Crawler) crawl(seedURL *url.URL, chURL chan *url.URL, handler Handler) {
-	// one completed close channel
-	defer func() {
-		close(chURL)
-	}()
+func (c *Crawler) crawl(id int, handler Handler, quit chan int) {
 
 	// initialize a client for each routine
 	client := http.Client{
@@ -138,23 +118,21 @@ func (c *Crawler) crawl(seedURL *url.URL, chURL chan *url.URL, handler Handler) 
 	crawled := make(map[string]bool)
 	q := queue.NewQueue()
 
-	// resolve references if present
-	seedURL = seedURL.ResolveReference(seedURL)
 	// push the seed in queue
-	q.Push(urlData{pURL: seedURL, dist: -1})
-	inQueue[seedURL.String()] = true
+	q.Push(urlData{pURL: c.seedURLs[id], dist: -1})
+	inQueue[c.seedURLs[id].String()] = true
 
 	for q.Size() > 0 {
 		elem := q.Pop().(urlData)
 
-		plainURL := elem.pURL.String()
-		res, err := client.Get(plainURL)
-		if skip := LogResponse(plainURL, res, err); skip {
+		cleanURL := elem.pURL.String()
+		res, err := GetURL(&client, cleanURL)
+		if err != nil {
 			continue
 		}
 
-		reqURL := ClearURL(res.Request.URL)
-		if _, ok := crawled[reqURL]; ok {
+		cleanURL = ClearURL(res.Request.URL)
+		if _, ok := crawled[cleanURL]; ok {
 			continue
 		}
 
@@ -164,10 +142,10 @@ func (c *Crawler) crawl(seedURL *url.URL, chURL chan *url.URL, handler Handler) 
 		}
 
 		// save new URL whose request went through
-		crawled[reqURL] = true
-		res.Request.URL, _ = url.Parse(reqURL)
+		crawled[cleanURL] = true
+		res.Request.URL, _ = url.Parse(cleanURL)
 		elem.pURL = res.Request.URL
-		chURL <- elem.pURL
+		c.discURLs[id] = append(c.discURLs[id], elem.pURL.String())
 		if err = handler(res); err != nil {
 			return
 		}
@@ -189,7 +167,7 @@ func (c *Crawler) crawl(seedURL *url.URL, chURL chan *url.URL, handler Handler) 
 				continue
 			}
 
-			nextElem, valid := c.isValid(seedURL, elem, nextURL)
+			nextElem, valid := c.isValid(id, elem, nextURL)
 			if !valid {
 				continue
 			}
@@ -205,4 +183,5 @@ func (c *Crawler) crawl(seedURL *url.URL, chURL chan *url.URL, handler Handler) 
 			}
 		}
 	}
+	quit <- id
 }
