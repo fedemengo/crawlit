@@ -1,6 +1,7 @@
-package crawler
+package crawlit
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -19,19 +20,17 @@ func ClearURL(u *url.URL) string {
 	return plainURL
 }
 
-// LogResponse print the status of the response
-func LogResponse(url string, res *http.Response, err error) (skip bool) {
-	skip = false
+// GetURL is a custom wrapper around client.Get for better handling response status
+func GetURL(c *http.Client, url string) (res *http.Response, err error) {
+	res, err = c.Get(url)
 	if err != nil {
 		if netError, ok := err.(net.Error); ok && netError.Timeout() {
-			//fmt.Printf("ERROR TIMEOUT: on \"%s\"\n", url)
+			err = fmt.Errorf("Timeout on \"%s\" skipping", url)
 		} else {
-			//fmt.Printf("ERROR: can't crawl \"%s\"\n", url)
+			err = fmt.Errorf("Error on \"%s\" skipping", url)
 		}
-		skip = true
 	} else if code := res.StatusCode; code != 200 {
-		//fmt.Printf("ERROR %d: skipping \"%s\"\n", code, url)
-		skip = true
+		err = fmt.Errorf("StatusCode %d on \"%s\" skipping", code, url)
 	}
 	return
 }
