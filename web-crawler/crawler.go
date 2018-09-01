@@ -2,31 +2,32 @@ package crawler
 
 import (
 	"fmt"
-	"github.com/fedemengo/go-utility/data-structures/queue"
-	"net"
 	"net/http"
 	"net/url"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/fedemengo/go-utility/data-structures/queue"
 )
 
+// Handler callback type
 type Handler func(res *http.Response) error
 
 type urlData struct {
-	seed string
-	rawUrl *url.URL	
+	pURL *url.URL
 	dist int
 }
 
 // Crawler represent an object to extrapolate link from website
 type Crawler struct {
-	URLs     []*url.URL
-	Restrict bool
-	Distance int
-	maxURL	 int
-	client   http.Client
-	resultCh chan map[string][]string
+	seedURLs  []*url.URL
+	restrict  bool
+	distance  int
+	timeout   int
+	maxURL    int
+	maxQueued int
+	discURLs  [][]string
+	result    chan map[int][]string
 }
 
 // NewCrawler creates a new Crawler instance
@@ -34,137 +35,153 @@ func NewCrawler(urls []string, restrict bool, distance, timeout, maxURL int) *Cr
 	c := new(Crawler)
 	for _, u := range urls {
 		next, err := url.Parse(u)
+		next = next.ResolveReference(next)
 		if err == nil {
-			c.URLs = append(c.URLs, next)
+			c.seedURLs = append(c.seedURLs, next)
 		}
 	}
-	c.Restrict = restrict
-	c.Distance = distance
+	c.restrict = restrict
+	c.distance = distance
+	c.timeout = timeout
 	c.maxURL = maxURL
-	c.client = http.Client{
-		Timeout: time.Duration(time.Duration(timeout) * time.Second),
-	}
-	c.resultCh = make(chan map[string][]string)
+	c.maxQueued = 100 * c.maxURL
+	c.discURLs = make([][]string, len(c.seedURLs))
+	c.result = make(chan map[int][]string)
 	return c
 }
 
-// Result will return the result of the crawling
-func (c *Crawler) Result() (urls map[string][]string) {
-	urls = <-c.resultCh
+// Result will return the result of the crawling, blocking
+func (c *Crawler) Result() (urls map[int][]string) {
+	urls = <-c.result
 	return
 }
 
 // Crawl is the public method used to start the crawling
 func (c *Crawler) Crawl(handler Handler) {
-	result := make(map[string][]string)
-	chURLs := make(chan urlData)
 
-	for _, u := range c.URLs {
-		go c.crawl(u, chURLs, handler)
+	results := make(map[int][]string)
+	// notify when routines are done
+	quit := make(chan int)
+
+	// spawn a routine for each seed to crawl
+	for i := range c.seedURLs {
+		go c.crawl(i, handler, quit)
 	}
 
-	// listen for result and termination
+	// routine listen for result and termination
 	go func() {
-		for routines := len(c.URLs); routines > 0; {
+		for seeds := len(c.seedURLs); seeds > 0; {
 			select {
-			case data, ok := <-chURLs:
-				if ok {
-					result[data.seed] = append(result[data.seed], data.rawUrl.String())
-				} else {
-					routines--
-				} 
+			// listen for completed seed
+			case id := <-quit:
+				seeds--
+				results[id] = c.discURLs[id]
+				fmt.Println("COMPLETE", c.seedURLs[id].String())
 			}
 		}
-		c.resultCh <- result
-		//close(c.resultCh)
+		close(quit)
+		c.result <- results
 	}()
 }
 
-func (c Crawler) crawl(newURL *url.URL, chURL chan urlData, handler Handler) {
-	defer func() {
-		close(chURL)
-	}()
-	
-	maxQueued := 10 * c.maxURL
+func (c *Crawler) isValid(id int, elem urlData, nextURL *url.URL) (uData urlData, valid bool) {
+	uData = urlData{pURL: nextURL, dist: elem.dist + 1}
+	valid = true
 
-	discoverd := 0
+	if c.distance == -1 {
+		if elem.pURL.Host != c.seedURLs[id].Host {
+			valid = false
+		}
+	} else if uData.dist > c.distance {
+		valid = false
+	}
+
+	if c.restrict && nextURL.Host != c.seedURLs[id].Host {
+		valid = false
+	}
+
+	ClearURL(uData.pURL)
+	return
+}
+
+func (c *Crawler) crawl(id int, handler Handler, quit chan int) {
+
+	// initialize a client for each routine
+	client := http.Client{
+		Timeout: time.Duration(time.Duration(c.timeout) * time.Second),
+	}
+
+	discovered := 0
+	// keep track of the queued url
 	inQueue := make(map[string]bool)
+	// keep track of the crawled url (res.StatusCode == 200)
 	crawled := make(map[string]bool)
 	q := queue.NewQueue()
 
-	newURL = newURL.ResolveReference(newURL)
-	q.Push(urlData{seed: newURL.Host, rawUrl: newURL, dist: 0})
-	inQueue[newURL.String()] = true
+	// push the seed in queue
+	q.Push(urlData{pURL: c.seedURLs[id], dist: -1})
+	inQueue[c.seedURLs[id].String()] = true
 
 	for q.Size() > 0 {
-
 		elem := q.Pop().(urlData)
-		res, err := c.client.Get(elem.rawUrl.String())
+
+		cleanURL := elem.pURL.String()
+		res, err := GetURL(&client, cleanURL)
 		if err != nil {
-			if netError, ok := err.(net.Error); ok && netError.Timeout() {
-				fmt.Println("ERROR TIMEOUT: on", "\""+elem.rawUrl.String()+"\"")
-			} else {
-				fmt.Println("ERROR: can't crawl", "\""+elem.rawUrl.String()+"\"")
-			}
-			continue
-		} else if res.StatusCode == 404 {
-			fmt.Println("ERROR 404: skipping", "\""+elem.rawUrl.String()+"\"")
 			continue
 		}
 
-		discoverd++
-		if discoverd > c.maxURL {
+		cleanURL = ClearURL(res.Request.URL)
+		if _, ok := crawled[cleanURL]; ok {
+			continue
+		}
+
+		discovered++
+		if discovered > c.maxURL {
 			return
 		}
 
-		reqUrl := ClearUrl(res.Request.URL)
-		if _, ok := crawled[reqUrl]; ok {
-			continue
-		}
-
-		// save new URL
-		crawled[reqUrl] = true
-		elem.rawUrl = res.Request.URL
-		chURL <- elem
+		// save new URL whose request went through
+		crawled[cleanURL] = true
+		res.Request.URL, _ = url.Parse(cleanURL)
+		elem.pURL = res.Request.URL
+		c.discURLs[id] = append(c.discURLs[id], elem.pURL.String())
 		if err = handler(res); err != nil {
 			return
 		}
-	
+
 		body := res.Body
 		defer body.Close()
-	
 		doc, err := goquery.NewDocumentFromReader(body)
 		if err != nil {
-			fmt.Println("ERROR: can't read body")
+			//fmt.Println("ERROR: can't read body")
 			continue
 		}
-		
+
 		selector := doc.Find("a")
 		for i := range selector.Nodes {
 
 			href, _ := selector.Eq(i).Attr("href")
-			nextURL, err := newURL.Parse(href)
-			if err != nil || (c.Restrict && nextURL.Host != newURL.Host) {
+			nextURL, err := elem.pURL.Parse(href)
+			if err != nil {
 				continue
 			}
-		
-			cleanURL := ClearUrl(nextURL)
-			if _, ok := inQueue[cleanURL]; !ok {
-				dist := elem.dist
-				if nextURL.Host != elem.rawUrl.Host {
-					dist++
-				}
-				
-				if dist > c.Distance {
-					continue
-				}
-							
-				if q.Size() < maxQueued {
-					data := urlData{seed: newURL.Host, rawUrl: nextURL, dist: dist}
-					q.Push(data)
-					inQueue[cleanURL] = true
-				}
+
+			nextElem, valid := c.isValid(id, elem, nextURL)
+			if !valid {
+				continue
+			}
+
+			if _, ok := inQueue[nextElem.pURL.String()]; ok {
+				continue
+			}
+
+			if q.Size() < c.maxQueued {
+				q.Push(nextElem)
+				// avoid duplicate URL in queue
+				inQueue[nextElem.pURL.String()] = true
 			}
 		}
 	}
+	quit <- id
 }
