@@ -5,10 +5,31 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/fedemengo/search-engine/web-crawler"
+	"github.com/fedemengo/search-engine/backend/api"
+	crawler "github.com/fedemengo/search-engine/backend/web-crawler"
+	"github.com/gin-gonic/gin"
 )
 
+var router *gin.Engine
+
+func init() {
+	router = gin.Default()
+	router.Delims("${", "}")
+	router.LoadHTMLGlob("./frontend/public/*")
+}
+
 func main() {
+	go runCrawler()
+	runServer()
+}
+
+func runServer() {
+	router.GET("/", api.SearchHandler)
+	router.Run(":4000")
+
+}
+
+func runCrawler() {
 	seedURLs := os.Args[1:]
 
 	// urls
