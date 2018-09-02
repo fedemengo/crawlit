@@ -21,18 +21,18 @@ func ClearURL(u *url.URL) string {
 }
 
 // ValidURL check if a URL is valid given a crawling configuration
-func ValidURL(config CrawlConfig, id int, elem urlData, nextURL *url.URL) (valid bool) {
+func ValidURL(config CrawlConfig, id int, elem queueElem, startURL, nextURL *url.URL) (valid bool) {
 	valid = true
 
-	if config.MaxDistance == -1 {
-		if elem.url.Host != config.seedURLs[id].Host {
+	if config.MaxDistance == 0 {
+		if elem.url.Host != startURL.Host {
 			valid = false
 		}
-	} else if elem.dist+1 > config.MaxDistance {
+	} else if config.MaxDistance != -1 && elem.dist+1 > config.MaxDistance {
 		valid = false
 	}
 
-	if config.Restrict && nextURL.Host != config.seedURLs[id].Host {
+	if config.Restrict && nextURL.Host != startURL.Host {
 		valid = false
 	}
 
@@ -41,8 +41,8 @@ func ValidURL(config CrawlConfig, id int, elem urlData, nextURL *url.URL) (valid
 }
 
 // GetURL is a custom wrapper around client.Get for better handling response status
-func GetURL(c *http.Client, url string) (res *http.Response, err error) {
-	res, err = c.Get(url)
+func GetURL(c *http.Client, url *url.URL) (res *http.Response, err error) {
+	res, err = c.Get(url.String())
 	if err != nil {
 		if netError, ok := err.(net.Error); ok && netError.Timeout() {
 			err = fmt.Errorf("Timeout on \"%s\" skipping", url)
