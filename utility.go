@@ -20,6 +20,26 @@ func ClearURL(u *url.URL) string {
 	return plainURL
 }
 
+// ValidURL check if a URL is valid given a crawling configuration
+func ValidURL(config CrawlConfig, id int, elem urlData, nextURL *url.URL) (valid bool) {
+	valid = true
+
+	if config.MaxDistance == -1 {
+		if elem.url.Host != config.seedURLs[id].Host {
+			valid = false
+		}
+	} else if elem.dist+1 > config.MaxDistance {
+		valid = false
+	}
+
+	if config.Restrict && nextURL.Host != config.seedURLs[id].Host {
+		valid = false
+	}
+
+	ClearURL(nextURL)
+	return
+}
+
 // GetURL is a custom wrapper around client.Get for better handling response status
 func GetURL(c *http.Client, url string) (res *http.Response, err error) {
 	res, err = c.Get(url)

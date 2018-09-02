@@ -88,26 +88,6 @@ func (c *Crawler) Crawl(config CrawlConfig, handler Handler) {
 	}()
 }
 
-func (c *Crawler) isValid(config CrawlConfig, id int, elem urlData, nextURL *url.URL) (uData urlData, valid bool) {
-	uData = urlData{url: nextURL, dist: elem.dist + 1}
-	valid = true
-
-	if config.MaxDistance == -1 {
-		if elem.url.Host != config.seedURLs[id].Host {
-			valid = false
-		}
-	} else if uData.dist > config.MaxDistance {
-		valid = false
-	}
-
-	if config.Restrict && nextURL.Host != config.seedURLs[id].Host {
-		valid = false
-	}
-
-	ClearURL(uData.url)
-	return
-}
-
 func (c *Crawler) crawl(config CrawlConfig, id int, collect *[]string, quit chan int, handler Handler) {
 
 	// initialize a client for each routine
@@ -172,11 +152,11 @@ func (c *Crawler) crawl(config CrawlConfig, id int, collect *[]string, quit chan
 				continue
 			}
 
-			nextElem, valid := c.isValid(config, id, elem, nextURL)
-			if !valid {
+			if !ValidURL(config, id, elem, nextURL) {
 				continue
 			}
 
+			nextElem := urlData{url: nextURL, dist: elem.dist + 1}
 			if _, ok := inQueue[nextElem.url.String()]; ok {
 				continue
 			}
