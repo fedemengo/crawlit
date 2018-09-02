@@ -1,24 +1,3 @@
-# Crawlit
-
-Stateless basic web crawler configurable on each crawling call. All host is crawled concurrently, so `c.Crawl(config, handler)` is **non-blocking** and it calls the `handler` function for every valid url discovered. 
-
-The method `c.Result()`, on the other hand, is blocking and once called it consume the result of **one** crawling. At the moment the order of crawling collection (the call to `c.Result()`) doesn't reflect the order in which the crawling started.
-
-## Configuration
-
-```go
-type CrawlConfig struct {
-	SeedURLs    []string
-	MaxURLs     int         // maximum number of URL to crawl
-	MaxDistance int         // maximum page distance to crawl: -1 for infinite, 0 to crawl the whole host
-	Timeout     int         // maximum timeout to wait for response
-	Restrict    bool        // restrict crawling to seed host
-}
-```
-
-## Example
-
-```go
 package main
 
 import (
@@ -73,4 +52,3 @@ func main() {
 		}
 	}
 }
-```

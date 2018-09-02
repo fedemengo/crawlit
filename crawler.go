@@ -10,105 +10,87 @@ import (
 	"github.com/fedemengo/go-data-structures/queue"
 )
 
+// CrawlConfig specify some parameters for the crawling
+type CrawlConfig struct {
+	SeedURLs []string
+	// maximum number of URL to crawl
+	MaxURLs int
+	// maximum page distance to crawl: -1 for infinite, 0 for crawling the whole host
+	MaxDistance int
+	// maximum timeout to wait for response
+	Timeout int
+	// restrict crawling to seed host
+	Restrict bool
+}
+
 // Handler callback type
 type Handler func(res *http.Response) error
 
-type urlData struct {
-	pURL *url.URL
+type queueElem struct {
+	url  *url.URL
 	dist int
 }
 
 // Crawler represent an object to extrapolate link from website
 type Crawler struct {
-	seedURLs  []*url.URL
-	restrict  bool
-	distance  int
-	timeout   int
-	maxURL    int
-	maxQueued int
-	discURLs  [][]string
-	result    chan map[int][]string
+	result  chan map[string][]string
+	routine int
 }
 
 // NewCrawler creates a new Crawler instance
-func NewCrawler(urls []string, restrict bool, distance, timeout, maxURL int) *Crawler {
+func NewCrawler() *Crawler {
 	c := new(Crawler)
-	for _, u := range urls {
-		next, err := url.Parse(u)
-		next = next.ResolveReference(next)
-		if err == nil {
-			c.seedURLs = append(c.seedURLs, next)
-		}
-	}
-	c.restrict = restrict
-	c.distance = distance
-	c.timeout = timeout
-	c.maxURL = maxURL
-	c.maxQueued = 100 * c.maxURL
-	c.discURLs = make([][]string, len(c.seedURLs))
-	c.result = make(chan map[int][]string)
+	c.result = make(chan map[string][]string)
+	c.routine = 0
 	return c
 }
 
 // Result will return the result of the crawling, blocking
-func (c *Crawler) Result() (urls map[int][]string) {
+func (c *Crawler) Result() (urls map[string][]string) {
 	urls = <-c.result
 	return
 }
 
 // Crawl is the public method used to start the crawling
-func (c *Crawler) Crawl(handler Handler) {
+func (c *Crawler) Crawl(config CrawlConfig, handler Handler) {
 
-	results := make(map[int][]string)
+	results := make(map[string][]string)
 	// notify when routines are done
-	quit := make(chan int)
+	done := make(chan int)
 
+	collect := make([][]string, len(config.SeedURLs))
+	routines := 0
 	// spawn a routine for each seed to crawl
-	for i := range c.seedURLs {
-		go c.crawl(i, handler, quit)
+	for i := range config.SeedURLs {
+		collect[i] = make([]string, 0)
+		go c.crawl(config, i, &collect[i], done, handler)
+		routines++
 	}
 
 	// routine listen for result and termination
 	go func() {
-		for seeds := len(c.seedURLs); seeds > 0; {
+		for routines > 0 {
 			select {
 			// listen for completed seed
-			case id := <-quit:
-				seeds--
-				results[id] = c.discURLs[id]
-				fmt.Println("COMPLETE", c.seedURLs[id].String())
+			case id := <-done:
+				routines--
+				results[config.SeedURLs[id]] = collect[id]
+				fmt.Println("COMPLETE", config.SeedURLs[id])
 			}
 		}
-		close(quit)
+		close(done)
 		c.result <- results
 	}()
 }
 
-func (c *Crawler) isValid(id int, elem urlData, nextURL *url.URL) (uData urlData, valid bool) {
-	uData = urlData{pURL: nextURL, dist: elem.dist + 1}
-	valid = true
+func (c *Crawler) crawl(config CrawlConfig, id int, collect *[]string, done chan int, handler Handler) {
+	defer func() {
+		done <- id
+	}()
 
-	if c.distance == -1 {
-		if elem.pURL.Host != c.seedURLs[id].Host {
-			valid = false
-		}
-	} else if uData.dist > c.distance {
-		valid = false
-	}
-
-	if c.restrict && nextURL.Host != c.seedURLs[id].Host {
-		valid = false
-	}
-
-	ClearURL(uData.pURL)
-	return
-}
-
-func (c *Crawler) crawl(id int, handler Handler, quit chan int) {
-
-	// initialize a client for each routine
-	client := http.Client{
-		Timeout: time.Duration(time.Duration(c.timeout) * time.Second),
+	startURL, err := url.Parse(config.SeedURLs[id])
+	if err != nil {
+		return
 	}
 
 	discovered := 0
@@ -116,36 +98,38 @@ func (c *Crawler) crawl(id int, handler Handler, quit chan int) {
 	inQueue := make(map[string]bool)
 	// keep track of the crawled url (res.StatusCode == 200)
 	crawled := make(map[string]bool)
-	q := queue.NewQueue()
 
-	// push the seed in queue
-	q.Push(urlData{pURL: c.seedURLs[id], dist: -1})
-	inQueue[c.seedURLs[id].String()] = true
+	// one http.Client for each routine
+	client := http.Client{
+		Timeout: time.Duration(time.Duration(config.Timeout) * time.Second),
+	}
+
+	q := queue.NewQueue()
+	q.Push(queueElem{url: startURL, dist: 0})
+	inQueue[startURL.String()] = true
 
 	for q.Size() > 0 {
-		elem := q.Pop().(urlData)
+		elem := q.Pop().(queueElem)
 
-		cleanURL := elem.pURL.String()
-		res, err := GetURL(&client, cleanURL)
+		res, err := GetURL(&client, elem.url)
 		if err != nil {
 			continue
 		}
 
-		cleanURL = ClearURL(res.Request.URL)
+		cleanURL := ClearURL(res.Request.URL)
 		if _, ok := crawled[cleanURL]; ok {
 			continue
 		}
 
 		discovered++
-		if discovered > c.maxURL {
+		if discovered > config.MaxURLs {
 			return
 		}
 
 		// save new URL whose request went through
 		crawled[cleanURL] = true
-		res.Request.URL, _ = url.Parse(cleanURL)
-		elem.pURL = res.Request.URL
-		c.discURLs[id] = append(c.discURLs[id], elem.pURL.String())
+		elem.url, _ = url.Parse(cleanURL)
+		*collect = append(*collect, elem.url.String())
 		if err = handler(res); err != nil {
 			return
 		}
@@ -162,26 +146,23 @@ func (c *Crawler) crawl(id int, handler Handler, quit chan int) {
 		for i := range selector.Nodes {
 
 			href, _ := selector.Eq(i).Attr("href")
-			nextURL, err := elem.pURL.Parse(href)
+			nextURL, err := elem.url.Parse(href)
 			if err != nil {
 				continue
 			}
 
-			nextElem, valid := c.isValid(id, elem, nextURL)
-			if !valid {
+			if !ValidURL(config, id, elem, startURL, nextURL) {
 				continue
 			}
 
-			if _, ok := inQueue[nextElem.pURL.String()]; ok {
+			nextElem := queueElem{url: nextURL, dist: elem.dist + 1}
+			if _, ok := inQueue[nextElem.url.String()]; ok {
 				continue
 			}
 
-			if q.Size() < c.maxQueued {
-				q.Push(nextElem)
-				// avoid duplicate URL in queue
-				inQueue[nextElem.pURL.String()] = true
-			}
+			// avoid duplicate URL in queue
+			q.Push(nextElem)
+			inQueue[nextElem.url.String()] = true
 		}
 	}
-	quit <- id
 }
