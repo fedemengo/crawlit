@@ -1,4 +1,4 @@
-package crawler
+package crawlit
 
 import (
 	"fmt"
@@ -7,76 +7,80 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	"github.com/fedemengo/go-utility/data-structures/queue"
+	"github.com/fedemengo/go-data-structures/queue"
 )
+
+// CrawlConfig specify some parameters for the crawling
+type CrawlConfig struct {
+	SeedURLs    []string
+	MaxURLs     int
+	MaxDistance int
+	Timeout     int
+	Restrict    bool
+	seedURLs    []*url.URL
+}
 
 // Handler callback type
 type Handler func(res *http.Response) error
 
 type urlData struct {
-	pURL *url.URL
+	url  *url.URL
 	dist int
 }
 
 // Crawler represent an object to extrapolate link from website
 type Crawler struct {
-	seedURLs  []*url.URL
-	restrict  bool
-	distance  int
-	timeout   int
-	maxURL    int
-	maxQueued int
-	discURLs  [][]string
-	result    chan map[int][]string
+	result  chan map[int][]string
+	routine int
 }
 
 // NewCrawler creates a new Crawler instance
-func NewCrawler(urls []string, restrict bool, distance, timeout, maxURL int) *Crawler {
+func NewCrawler() *Crawler {
 	c := new(Crawler)
-	for _, u := range urls {
-		next, err := url.Parse(u)
-		next = next.ResolveReference(next)
-		if err == nil {
-			c.seedURLs = append(c.seedURLs, next)
-		}
-	}
-	c.restrict = restrict
-	c.distance = distance
-	c.timeout = timeout
-	c.maxURL = maxURL
-	c.maxQueued = 100 * c.maxURL
-	c.discURLs = make([][]string, len(c.seedURLs))
 	c.result = make(chan map[int][]string)
+	c.routine = 0
 	return c
 }
 
 // Result will return the result of the crawling, blocking
 func (c *Crawler) Result() (urls map[int][]string) {
+
 	urls = <-c.result
 	return
 }
 
 // Crawl is the public method used to start the crawling
-func (c *Crawler) Crawl(handler Handler) {
+func (c *Crawler) Crawl(config CrawlConfig, handler Handler) {
 
 	results := make(map[int][]string)
 	// notify when routines are done
 	quit := make(chan int)
 
+	config.seedURLs = make([]*url.URL, len(config.SeedURLs))
+	for i, u := range config.SeedURLs {
+		url, err := url.Parse(u)
+		url = url.ResolveReference(url)
+		if err == nil {
+			config.seedURLs[i] = url
+		}
+	}
+
+	collect := make([][]string, len(config.SeedURLs))
 	// spawn a routine for each seed to crawl
-	for i := range c.seedURLs {
-		go c.crawl(i, handler, quit)
+	for i := range config.seedURLs {
+		collect[i] = make([]string, 0)
+		go c.crawl(config, i, &collect[i], quit, handler)
 	}
 
 	// routine listen for result and termination
 	go func() {
-		for seeds := len(c.seedURLs); seeds > 0; {
+		for seeds := len(config.seedURLs); seeds > 0; {
 			select {
 			// listen for completed seed
 			case id := <-quit:
 				seeds--
-				results[id] = c.discURLs[id]
-				fmt.Println("COMPLETE", c.seedURLs[id].String())
+				results[id] = collect[id]
+				fmt.Println("COMPLETE", config.SeedURLs[id])
 			}
 		}
 		close(quit)
@@ -84,31 +88,31 @@ func (c *Crawler) Crawl(handler Handler) {
 	}()
 }
 
-func (c *Crawler) isValid(id int, elem urlData, nextURL *url.URL) (uData urlData, valid bool) {
-	uData = urlData{pURL: nextURL, dist: elem.dist + 1}
+func (c *Crawler) isValid(config CrawlConfig, id int, elem urlData, nextURL *url.URL) (uData urlData, valid bool) {
+	uData = urlData{url: nextURL, dist: elem.dist + 1}
 	valid = true
 
-	if c.distance == -1 {
-		if elem.pURL.Host != c.seedURLs[id].Host {
+	if config.MaxDistance == -1 {
+		if elem.url.Host != config.seedURLs[id].Host {
 			valid = false
 		}
-	} else if uData.dist > c.distance {
+	} else if uData.dist > config.MaxDistance {
 		valid = false
 	}
 
-	if c.restrict && nextURL.Host != c.seedURLs[id].Host {
+	if config.Restrict && nextURL.Host != config.seedURLs[id].Host {
 		valid = false
 	}
 
-	ClearURL(uData.pURL)
+	ClearURL(uData.url)
 	return
 }
 
-func (c *Crawler) crawl(id int, handler Handler, quit chan int) {
+func (c *Crawler) crawl(config CrawlConfig, id int, collect *[]string, quit chan int, handler Handler) {
 
 	// initialize a client for each routine
 	client := http.Client{
-		Timeout: time.Duration(time.Duration(c.timeout) * time.Second),
+		Timeout: time.Duration(time.Duration(config.Timeout) * time.Second),
 	}
 
 	discovered := 0
@@ -119,13 +123,13 @@ func (c *Crawler) crawl(id int, handler Handler, quit chan int) {
 	q := queue.NewQueue()
 
 	// push the seed in queue
-	q.Push(urlData{pURL: c.seedURLs[id], dist: -1})
-	inQueue[c.seedURLs[id].String()] = true
+	q.Push(urlData{url: config.seedURLs[id], dist: -1})
+	inQueue[config.seedURLs[id].String()] = true
 
 	for q.Size() > 0 {
 		elem := q.Pop().(urlData)
 
-		cleanURL := elem.pURL.String()
+		cleanURL := elem.url.String()
 		res, err := GetURL(&client, cleanURL)
 		if err != nil {
 			continue
@@ -137,15 +141,16 @@ func (c *Crawler) crawl(id int, handler Handler, quit chan int) {
 		}
 
 		discovered++
-		if discovered > c.maxURL {
+		if discovered > config.MaxURLs {
+			quit <- id
 			return
 		}
 
 		// save new URL whose request went through
 		crawled[cleanURL] = true
 		res.Request.URL, _ = url.Parse(cleanURL)
-		elem.pURL = res.Request.URL
-		c.discURLs[id] = append(c.discURLs[id], elem.pURL.String())
+		elem.url = res.Request.URL
+		*collect = append(*collect, elem.url.String())
 		if err = handler(res); err != nil {
 			return
 		}
@@ -162,25 +167,24 @@ func (c *Crawler) crawl(id int, handler Handler, quit chan int) {
 		for i := range selector.Nodes {
 
 			href, _ := selector.Eq(i).Attr("href")
-			nextURL, err := elem.pURL.Parse(href)
+			nextURL, err := elem.url.Parse(href)
 			if err != nil {
 				continue
 			}
 
-			nextElem, valid := c.isValid(id, elem, nextURL)
+			nextElem, valid := c.isValid(config, id, elem, nextURL)
 			if !valid {
 				continue
 			}
 
-			if _, ok := inQueue[nextElem.pURL.String()]; ok {
+			if _, ok := inQueue[nextElem.url.String()]; ok {
 				continue
 			}
 
-			if q.Size() < c.maxQueued {
-				q.Push(nextElem)
-				// avoid duplicate URL in queue
-				inQueue[nextElem.pURL.String()] = true
-			}
+			q.Push(nextElem)
+			// avoid duplicate URL in queue
+			inQueue[nextElem.url.String()] = true
+
 		}
 	}
 	quit <- id
