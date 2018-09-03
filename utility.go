@@ -21,7 +21,7 @@ func ClearURL(u *url.URL) string {
 }
 
 // ValidURL check if a URL is valid given a crawling configuration
-func ValidURL(config CrawlConfig, id int, elem queueElem, startURL, nextURL *url.URL) (valid bool) {
+func ValidURL(config CrawlConfig, elem queueElem, startURL, nextURL *url.URL) (valid bool) {
 	valid = true
 
 	if config.MaxDistance == 0 {

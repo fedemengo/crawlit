@@ -1,6 +1,7 @@
 package crawlit
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -26,6 +27,12 @@ type CrawlConfig struct {
 // Handler callback type
 type Handler func(res *http.Response) error
 
+// SkipURL type for handler
+var SkipURL = errors.New("skip this URL")
+
+// StopCrawl type for handler
+var StopCrawl = errors.New("stop crawling")
+
 type queueElem struct {
 	url  *url.URL
 	dist int
@@ -33,15 +40,13 @@ type queueElem struct {
 
 // Crawler represent an object to extrapolate link from website
 type Crawler struct {
-	result  chan map[string][]string
-	routine int
+	result chan map[string][]string
 }
 
 // NewCrawler creates a new Crawler instance
 func NewCrawler() *Crawler {
 	c := new(Crawler)
 	c.result = make(chan map[string][]string)
-	c.routine = 0
 	return c
 }
 
@@ -59,17 +64,15 @@ func (c *Crawler) Crawl(config CrawlConfig, handler Handler) {
 	done := make(chan int)
 
 	collect := make([][]string, len(config.SeedURLs))
-	routines := 0
 	// spawn a routine for each seed to crawl
 	for i := range config.SeedURLs {
 		collect[i] = make([]string, 0)
-		go c.crawl(config, i, &collect[i], done, handler)
-		routines++
+		go crawlURL(config, i, &collect[i], done, handler)
 	}
 
 	// routine listen for result and termination
 	go func() {
-		for routines > 0 {
+		for routines := len(config.SeedURLs); routines > 0; {
 			select {
 			// listen for completed seed
 			case id := <-done:
@@ -83,7 +86,7 @@ func (c *Crawler) Crawl(config CrawlConfig, handler Handler) {
 	}()
 }
 
-func (c *Crawler) crawl(config CrawlConfig, id int, collect *[]string, done chan int, handler Handler) {
+func crawlURL(config CrawlConfig, id int, collect *[]string, done chan int, handler Handler) {
 	defer func() {
 		done <- id
 	}()
@@ -121,16 +124,23 @@ func (c *Crawler) crawl(config CrawlConfig, id int, collect *[]string, done chan
 			continue
 		}
 
-		discovered++
-		if discovered > config.MaxURLs {
-			return
+		// if handler return an error consider stopping crawler or skipping the URL
+		if err = handler(res); err != nil {
+			switch err {
+			case SkipURL:
+				continue
+			default:
+				return
+			}
 		}
 
 		// save new URL whose request went through
 		crawled[cleanURL] = true
 		elem.url, _ = url.Parse(cleanURL)
 		*collect = append(*collect, elem.url.String())
-		if err = handler(res); err != nil {
+
+		discovered++
+		if discovered == config.MaxURLs {
 			return
 		}
 
@@ -145,13 +155,17 @@ func (c *Crawler) crawl(config CrawlConfig, id int, collect *[]string, done chan
 		selector := doc.Find("a")
 		for i := range selector.Nodes {
 
-			href, _ := selector.Eq(i).Attr("href")
+			href, ok := selector.Eq(i).Attr("href")
+			if !ok {
+				continue
+			}
+
 			nextURL, err := elem.url.Parse(href)
 			if err != nil {
 				continue
 			}
 
-			if !ValidURL(config, id, elem, startURL, nextURL) {
+			if !ValidURL(config, elem, startURL, nextURL) {
 				continue
 			}
 

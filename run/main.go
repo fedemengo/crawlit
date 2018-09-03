@@ -22,6 +22,7 @@ func main() {
 
 	c.Crawl(config, func(res *http.Response) (err error) {
 		fmt.Println(" >> " + res.Request.URL.String())
+		//return crawlit.StopCrawl
 		return nil
 	})
 
@@ -35,7 +36,7 @@ func main() {
 
 	c.Crawl(config, func(res *http.Response) (err error) {
 		fmt.Println(" -- " + res.Request.URL.String())
-		return nil
+		return crawlit.SkipURL
 	})
 
 	fmt.Println("SOME OTHER STUFF")
