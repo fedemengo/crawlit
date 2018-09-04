@@ -14,7 +14,7 @@ func main() {
 
 	config := crawlit.CrawlConfig{
 		SeedURLs:    os.Args[1:2],
-		MaxURLs:     20,
+		MaxURLs:     1000,
 		MaxDistance: 0,
 		Timeout:     3,
 		Restrict:    false,

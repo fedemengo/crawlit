@@ -144,11 +144,9 @@ func crawlURL(config CrawlConfig, id int, collect *[]string, done chan int, hand
 			return
 		}
 
-		body := res.Body
-		defer body.Close()
-		doc, err := goquery.NewDocumentFromReader(body)
+		doc, err := goquery.NewDocumentFromReader(res.Body)
+		res.Body.Close()
 		if err != nil {
-			//fmt.Println("ERROR: can't read body")
 			continue
 		}
 
