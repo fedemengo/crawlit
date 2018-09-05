@@ -1,20 +1,20 @@
-package main
+package crawlit
 
 import (
 	"fmt"
 	"net/http"
 	"os"
-
-	"github.com/fedemengo/crawlit"
+	"testing"
 )
 
-func main() {
+func TestCrawler(t *testing.T) {
+	// pass argument with `go test -args arg1 arg2 ...`
 
-	c := crawlit.NewCrawler()
+	c := NewCrawler()
 
-	config := crawlit.CrawlConfig{
+	config := CrawlConfig{
 		SeedURLs:    os.Args[1:2],
-		MaxURLs:     1000,
+		MaxURLs:     20,
 		MaxDistance: 0,
 		Timeout:     3,
 		Restrict:    false,
@@ -26,7 +26,7 @@ func main() {
 		return nil
 	})
 
-	config = crawlit.CrawlConfig{
+	config = CrawlConfig{
 		SeedURLs:    os.Args[2:],
 		MaxURLs:     10,
 		MaxDistance: 1,
@@ -36,7 +36,7 @@ func main() {
 
 	c.Crawl(config, func(res *http.Response) (err error) {
 		fmt.Println(" -- " + res.Request.URL.String())
-		return crawlit.SkipURL
+		return SkipURL
 	})
 
 	fmt.Println("SOME OTHER STUFF")
@@ -52,4 +52,5 @@ func main() {
 			fmt.Println(" - " + u)
 		}
 	}
+
 }
