@@ -41,7 +41,7 @@ func main() {
 		Restrict:    false,
 	}
 
-	c.Crawl(config, func(res *http.Response) (err error) {
+	c.Crawl(config, func(res crawlit.CrawlitResponse) (err error) {
 		fmt.Println(" >> " + res.Request.URL.String())
 		//return crawlit.StopCrawl
 		return nil
@@ -55,7 +55,7 @@ func main() {
 		Restrict:    true,
 	}
 
-	c.Crawl(config, func(res *http.Response) (err error) {
+	c.Crawl(config, func(res crawlit.CrawlitResponse) (err error) {
 		fmt.Println(" -- " + res.Request.URL.String())
 		return crawlit.SkipURL
 	})

@@ -3,8 +3,9 @@ package crawlit
 import (
 	"errors"
 	"fmt"
-	"net/http"
 	"net/url"
+
+	"github.com/PuerkitoBio/goquery"
 )
 
 // CrawlConfig specify some parameters for the crawling
@@ -20,8 +21,14 @@ type CrawlConfig struct {
 	Restrict bool
 }
 
+// CrawlitResponse represent the data type returned from each request. Can be extended
+type CrawlitResponse struct {
+	URL  string
+	Body *goquery.Document
+}
+
 // Handler callback type
-type Handler func(res *http.Response) error
+type Handler func(res CrawlitResponse) error
 
 // SkipURL type for handler
 var SkipURL = errors.New("skip this URL")

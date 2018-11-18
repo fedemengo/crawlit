@@ -47,8 +47,19 @@ func crawlURL(config CrawlConfig, id int, collect *[]string, done chan int, hand
 			continue
 		}
 
+		body, err := goquery.NewDocumentFromReader(res.Body)
+		res.Body.Close()
+		if err != nil {
+			continue
+		}
+
+		response := CrawlitResponse{
+			URL:  res.Request.URL.String(),
+			Body: body,
+		}
+
 		// if handler return an error consider stopping crawler or skipping the URL
-		if err = handler(res); err != nil {
+		if err = handler(response); err != nil {
 			switch err {
 			case SkipURL:
 				continue
@@ -67,13 +78,7 @@ func crawlURL(config CrawlConfig, id int, collect *[]string, done chan int, hand
 			return
 		}
 
-		doc, err := goquery.NewDocumentFromReader(res.Body)
-		res.Body.Close()
-		if err != nil {
-			continue
-		}
-
-		selector := doc.Find("a")
+		selector := body.Find("a")
 		for i := range selector.Nodes {
 
 			href, ok := selector.Eq(i).Attr("href")
